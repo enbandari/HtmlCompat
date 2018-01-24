@@ -40,6 +40,7 @@ import java.io.StringReader;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Stack;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -64,6 +65,11 @@ class HtmlToSpannedConverter implements ContentHandler {
      * Name-value mapping of HTML/CSS colors which have different values in {@link Color}.
      */
     private static final Map<String, Integer> sColorMap;
+
+    /**
+     *  If we are in code or pre tags, don't ignore whitespaces.
+     */
+    private Stack<String> ignoreWhiteSpacesTagStack = new Stack<>();
 
     static {
         sColorMap = new HashMap<>();
@@ -302,6 +308,9 @@ class HtmlToSpannedConverter implements ContentHandler {
     }
 
     private void handleStartTag(String tag, Attributes attributes) {
+        if(tag.equalsIgnoreCase("pre") || tag.equalsIgnoreCase("code")){
+            ignoreWhiteSpacesTagStack.push(tag);
+        }
         if (tag.equalsIgnoreCase("br")) {
             // We don't need to handle this. TagSoup will ensure that there's a </br> for each <br>
             // so we can safely emit the linebreaks when we handle the close tag.
@@ -364,6 +373,10 @@ class HtmlToSpannedConverter implements ContentHandler {
     }
 
     private void handleEndTag(String tag) {
+        if(tag.equalsIgnoreCase("pre") || tag.equalsIgnoreCase("code")){
+            String poppedTag = ignoreWhiteSpacesTagStack.pop();
+            if (!poppedTag.equalsIgnoreCase(tag)) throw new AssertionError();
+        }
         if (tag.equalsIgnoreCase("br")) {
             handleBr(mSpannableStringBuilder);
         } else if (tag.equalsIgnoreCase("p")) {
@@ -745,34 +758,38 @@ class HtmlToSpannedConverter implements ContentHandler {
     }
 
     public void characters(char ch[], int start, int length) throws SAXException {
-        StringBuilder sb = new StringBuilder();
+        if(ignoreWhiteSpacesTagStack.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
         /*
          * Ignore whitespace that immediately follows other whitespace;
          * newlines count as spaces.
          */
-        for (int i = 0; i < length; i++) {
-            char c = ch[i + start];
-            if (c == ' ' || c == '\n') {
-                char pred;
-                int len = sb.length();
-                if (len == 0) {
-                    len = mSpannableStringBuilder.length();
+            for (int i = 0; i < length; i++) {
+                char c = ch[i + start];
+                if (c == ' ' || c == '\n') {
+                    char pred;
+                    int len = sb.length();
                     if (len == 0) {
-                        pred = '\n';
+                        len = mSpannableStringBuilder.length();
+                        if (len == 0) {
+                            pred = '\n';
+                        } else {
+                            pred = mSpannableStringBuilder.charAt(len - 1);
+                        }
                     } else {
-                        pred = mSpannableStringBuilder.charAt(len - 1);
+                        pred = sb.charAt(len - 1);
+                    }
+                    if (pred != ' ' && pred != '\n') {
+                        sb.append(' ');
                     }
                 } else {
-                    pred = sb.charAt(len - 1);
+                    sb.append(c);
                 }
-                if (pred != ' ' && pred != '\n') {
-                    sb.append(' ');
-                }
-            } else {
-                sb.append(c);
             }
+            mSpannableStringBuilder.append(sb);
+        } else {
+            mSpannableStringBuilder.append(String.copyValueOf(ch, start, length));
         }
-        mSpannableStringBuilder.append(sb);
     }
 
     public void ignorableWhitespace(char ch[], int start, int length) throws SAXException {
