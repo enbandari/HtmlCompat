@@ -2,6 +2,7 @@ package com.pixplicity.htmlcompat;
 
 import android.content.Context;
 import android.content.res.Resources;
+import android.content.res.TypedArray;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
@@ -26,6 +27,7 @@ import android.text.style.SubscriptSpan;
 import android.text.style.SuperscriptSpan;
 import android.text.style.TypefaceSpan;
 import android.text.style.UnderlineSpan;
+import android.util.Log;
 
 import org.ccil.cowan.tagsoup.Parser;
 import org.xml.sax.Attributes;
@@ -61,6 +63,9 @@ class HtmlToSpannedConverter implements ContentHandler {
     private static Pattern sBackgroundColorPattern;
     private static Pattern sTextDecorationPattern;
     private static Pattern sTextFontSizePattern;
+
+    private Stack<HtmlTagInfo> stack = new Stack<>();
+
     /**
      * Name-value mapping of HTML/CSS colors which have different values in {@link Color}.
      */
@@ -308,6 +313,8 @@ class HtmlToSpannedConverter implements ContentHandler {
     }
 
     private void handleStartTag(String tag, Attributes attributes) {
+        Log.d("HtmlCompat", "handleStartTag() called with: tag = [" + tag + "], attributes = [" + attributes + "]");
+        stack.push(new HtmlTagInfo(tag, mSpannableStringBuilder.length()));
         if(tag.equalsIgnoreCase("pre") || tag.equalsIgnoreCase("code")){
             ignoreWhiteSpacesTagStack.push(tag);
         }
@@ -373,6 +380,7 @@ class HtmlToSpannedConverter implements ContentHandler {
     }
 
     private void handleEndTag(String tag) {
+        HtmlTagInfo tagInfo = stack.pop();
         if(tag.equalsIgnoreCase("pre") || tag.equalsIgnoreCase("code")){
             String poppedTag = ignoreWhiteSpacesTagStack.pop();
             if (!poppedTag.equalsIgnoreCase(tag)) throw new AssertionError();
@@ -380,16 +388,16 @@ class HtmlToSpannedConverter implements ContentHandler {
         if (tag.equalsIgnoreCase("br")) {
             handleBr(mSpannableStringBuilder);
         } else if (tag.equalsIgnoreCase("p")) {
-            endCssStyle(tag, mSpannableStringBuilder);
+            endCssStyle(tag, tagInfo, mSpannableStringBuilder);
             endBlockElement(tag, mSpannableStringBuilder);
         } else if (tag.equalsIgnoreCase("ul")) {
             endBlockElement(tag, mSpannableStringBuilder);
         } else if (tag.equalsIgnoreCase("li")) {
-            endLi(tag, mSpannableStringBuilder);
+            endLi(tag, tagInfo, mSpannableStringBuilder);
         } else if (tag.equalsIgnoreCase("div")) {
             endBlockElement(tag, mSpannableStringBuilder);
         } else if (tag.equalsIgnoreCase("span")) {
-            endCssStyle(tag, mSpannableStringBuilder);
+            endCssStyle(tag, tagInfo, mSpannableStringBuilder);
         } else if (tag.equalsIgnoreCase("strong")) {
             end(tag, mSpannableStringBuilder, Bold.class, new StyleSpan(Typeface.BOLD));
         } else if (tag.equalsIgnoreCase("b")) {
@@ -529,8 +537,8 @@ class HtmlToSpannedConverter implements ContentHandler {
         startCssStyle(text, attributes);
     }
 
-    private void endLi(String tag, Editable text) {
-        endCssStyle(tag, text);
+    private void endLi(String tag, HtmlTagInfo tagInfo, Editable text) {
+        endCssStyle(tag, tagInfo, text);
         endBlockElement(tag, text);
         end(tag, text, Bullet.class, new BulletSpan());
     }
@@ -590,6 +598,7 @@ class HtmlToSpannedConverter implements ContentHandler {
 
     private void start(Editable text, Object mark) {
         int len = text.length();
+        stack.peek().tokens.add(mark);
         text.setSpan(mark, len, len, Spannable.SPAN_INCLUSIVE_EXCLUSIVE);
     }
 
@@ -601,6 +610,27 @@ class HtmlToSpannedConverter implements ContentHandler {
     }
 
     private void startCssStyle(Editable text, Attributes attributes) {
+        String classes = attributes.getValue("", "class");
+        for (String cls : classes.split(" ")) {
+            int classId = mContext.getResources().getIdentifier(cls.replace("-", "_"), "style", mContext.getPackageName());
+            if (classId == 0) {
+                Log.w("HtmlCompat", "Missing css class " + cls + ".");
+            } else {
+                TypedArray a = mContext.obtainStyledAttributes(null, R.styleable.HtmlCompatCssClass, 0, classId);
+                if (a != null) {
+                    int color = a.getColor(R.styleable.HtmlCompatCssClass_htmlForegroundColor, -1);
+                    if (color != -1) {
+                        start(text, new Foreground(color));
+                    } else {
+                        Log.w("HtmlCompat", "Missing HtmlCompatCssClass_htmlForegroundColor for css class " + cls + ", ignore css class.");
+                    }
+                    a.recycle();
+                } else {
+                    Log.w("HtmlCompat", "Missing HtmlCompatCssClass in your theme, ignore css.");
+                }
+            }
+        }
+
         String style = attributes.getValue("", "style");
         if (style != null) {
             Matcher m = getForegroundColorPattern().matcher(style);
@@ -642,26 +672,41 @@ class HtmlToSpannedConverter implements ContentHandler {
         }
     }
 
-    private void endCssStyle(String tag, Editable text) {
-        Strikethrough s = getLast(text, Strikethrough.class);
-        if (s != null) {
-            setSpanFromMark(tag, text, s, new StrikethroughSpan());
+    private void endCssStyle(String tag, HtmlTagInfo tagInfo, Editable text) {
+        Strikethrough strikethrough = getLast(text, Strikethrough.class);
+        if(strikethrough != null){
+            int spanStart = text.getSpanStart(strikethrough);
+            if(spanStart == tagInfo.start && tagInfo.tokens.remove(strikethrough)) {
+                setSpanFromMark(tag, text, strikethrough, new StrikethroughSpan());
+            }
         }
-        Background b = getLast(text, Background.class);
-        if (b != null) {
-            setSpanFromMark(tag, text, b, new BackgroundColorSpan(b.mBackgroundColor));
+        Background background = getLast(text, Background.class);
+        if(background != null) {
+            int spanStart = text.getSpanStart(background);
+            if (spanStart == tagInfo.start && tagInfo.tokens.remove(background)) {
+                setSpanFromMark(tag, text, background, new BackgroundColorSpan(background.mBackgroundColor));
+            }
         }
-        Foreground f = getLast(text, Foreground.class);
-        if (f != null) {
-            setSpanFromMark(tag, text, f, new ForegroundColorSpan(f.mForegroundColor));
+        Foreground foreground = getLast(text, Foreground.class);
+        if(foreground != null) {
+            int spanStart = text.getSpanStart(foreground);
+            if (spanStart == tagInfo.start && tagInfo.tokens.remove(foreground)) {
+                setSpanFromMark(tag, text, foreground, new ForegroundColorSpan(foreground.mForegroundColor));
+            }
         }
-        AbsoluteSize a = getLast(text, AbsoluteSize.class);
-        if (a != null) {
-            setSpanFromMark(tag, text, a, new AbsoluteSizeSpan(a.getTextSize()));
+        AbsoluteSize absoluteSize = getLast(text, AbsoluteSize.class);
+        if(absoluteSize != null) {
+            int spanStart = text.getSpanStart(absoluteSize);
+            if (spanStart == tagInfo.start && tagInfo.tokens.remove(absoluteSize)) {
+                setSpanFromMark(tag, text, absoluteSize, new AbsoluteSizeSpan(absoluteSize.getTextSize()));
+            }
         }
-        RelativeSize r = getLast(text, RelativeSize.class);
-        if (r != null) {
-            setSpanFromMark(tag, text, r, new RelativeSizeSpan(r.getTextProportion()));
+        RelativeSize relativeSize = getLast(text, RelativeSize.class);
+        if(relativeSize != null) {
+            int spanStart = text.getSpanStart(relativeSize);
+            if (spanStart == tagInfo.start && tagInfo.tokens.remove(relativeSize)) {
+                setSpanFromMark(tag, text, relativeSize, new RelativeSizeSpan(relativeSize.getTextProportion()));
+            }
         }
     }
 

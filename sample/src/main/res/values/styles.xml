@@ -6,6 +6,19 @@
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
+        <item name="htmlForegroundColor">@color/colorAccent</item>
+    </style>
+
+    <style name="pl_k">
+        <item name="htmlForegroundColor">#d73a49</item>
+    </style>
+
+    <style name="pl_s">
+        <item name="htmlForegroundColor">#00a000</item>
+    </style>
+
+    <style name="pl_en">
+        <item name="htmlForegroundColor">#6f42c1</item>
     </style>
 
 </resources>
