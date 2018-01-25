@@ -611,26 +611,27 @@ class HtmlToSpannedConverter implements ContentHandler {
 
     private void startCssStyle(Editable text, Attributes attributes) {
         String classes = attributes.getValue("", "class");
-        for (String cls : classes.split(" ")) {
-            int classId = mContext.getResources().getIdentifier(cls.replace("-", "_"), "style", mContext.getPackageName());
-            if (classId == 0) {
-                Log.w("HtmlCompat", "Missing css class " + cls + ".");
-            } else {
-                TypedArray a = mContext.obtainStyledAttributes(null, R.styleable.HtmlCompatCssClass, 0, classId);
-                if (a != null) {
-                    int color = a.getColor(R.styleable.HtmlCompatCssClass_htmlForegroundColor, -1);
-                    if (color != -1) {
-                        start(text, new Foreground(color));
-                    } else {
-                        Log.w("HtmlCompat", "Missing HtmlCompatCssClass_htmlForegroundColor for css class " + cls + ", ignore css class.");
-                    }
-                    a.recycle();
+        if(classes != null) {
+            for (String cls : classes.split(" ")) {
+                int classId = mContext.getResources().getIdentifier(cls.replace("-", "_"), "style", mContext.getPackageName());
+                if (classId == 0) {
+                    Log.w("HtmlCompat", "Missing css class " + cls + ".");
                 } else {
-                    Log.w("HtmlCompat", "Missing HtmlCompatCssClass in your theme, ignore css.");
+                    TypedArray a = mContext.obtainStyledAttributes(null, R.styleable.HtmlCompatCssClass, 0, classId);
+                    if (a != null) {
+                        int color = a.getColor(R.styleable.HtmlCompatCssClass_htmlForegroundColor, -1);
+                        if (color != -1) {
+                            start(text, new Foreground(color));
+                        } else {
+                            Log.w("HtmlCompat", "Missing HtmlCompatCssClass_htmlForegroundColor for css class " + cls + ", ignore css class.");
+                        }
+                        a.recycle();
+                    } else {
+                        Log.w("HtmlCompat", "Missing HtmlCompatCssClass in your theme, ignore css.");
+                    }
                 }
             }
         }
-
         String style = attributes.getValue("", "style");
         if (style != null) {
             Matcher m = getForegroundColorPattern().matcher(style);
